@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 
 # --- ASOSIY MA'LUMOTLAR ---
-API_TOKEN = '8027783889:AAGfvyoiQCEMGH2GfT9C_sK1BWZZcV9XsT0'
+API_TOKEN = '8027783889:AAGfvyo1QCEMGH2GfT9C_sK1BWZZcV9XsT0'
 ADMIN_ID = 7031270541 
 
 bot = Bot(token=API_TOKEN)
