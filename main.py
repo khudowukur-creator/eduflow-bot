@@ -16,9 +16,9 @@ CLICK_TOKEN = '398062629:TEST:999999999_F91D8F69C042267444B74CC0B3C747757EB0E065
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Render uchun fake port
+# Render uchun veb-interfeys (Port xatosini oldini oladi)
 async def handle(request):
-    return web.Response(text="Bot is running!")
+    return web.Response(text="Bot is running live!")
 
 class AddCourse(StatesGroup):
     name = State()
@@ -92,17 +92,17 @@ async def send_invoice(callback: types.CallbackQuery):
     course = cursor.fetchone()
     conn.close()
 
-    price_val = int(''.join(filter(str.isdigit, course[1]))) * 100 
-
-    await bot.send_invoice(
-        chat_id=callback.message.chat.id,
-        title=course[0],
-        description="To'lovdan so'ng video ochiladi.",
-        payload=f"course_{course_id}",
-        provider_token=CLICK_TOKEN,
-        currency="UZS",
-        prices=[types.LabeledPrice(label=course[0], amount=price_val)]
-    )
+    if course:
+        price_val = int(''.join(filter(str.isdigit, course[1]))) * 100 
+        await bot.send_invoice(
+            chat_id=callback.message.chat.id,
+            title=course[0],
+            description="Kurs uchun to'lov qiling va video darslikka ega bo'ling.",
+            payload=f"course_{course_id}",
+            provider_token=CLICK_TOKEN,
+            currency="UZS",
+            prices=[types.LabeledPrice(label=course[0], amount=price_val)]
+        )
 
 @dp.pre_checkout_query(lambda query: True)
 async def checkout(pre_checkout_query: types.Pre_checkout_query):
@@ -116,9 +116,9 @@ async def got_payment(message: types.Message):
     cursor.execute("INSERT INTO purchases (user_id, course_id) VALUES (?, ?)", (message.from_user.id, course_id))
     conn.commit()
     conn.close()
-    await message.answer("✅ To'lov muvaffaqiyatli! Endi videoni ko'rishingiz mumkin.")
+    await message.answer("✅ To'lov muvaffaqiyatli! Endi 'Videoni ko'rish' tugmasi orqali darsni ko'rishingiz mumkin.")
 
-# --- VIDEO HIMOYASI ---
+# --- VIDEO KO'RISH ---
 @dp.callback_query(F.data.startswith("view_"))
 async def view_video(callback: types.CallbackQuery):
     course_id = int(callback.data.split("_")[1])
@@ -134,11 +134,11 @@ async def view_video(callback: types.CallbackQuery):
     
     if paid or user_id == ADMIN_ID:
         if video and video[0]:
-            await callback.message.answer_video(video=video[0], caption="Marhamat, kurs videosi!")
+            await callback.message.answer_video(video=video[0], caption="Marhamat, dars videoni tomosha qiling!")
         else:
-            await callback.answer("Video yuklanmagan.", show_alert=True)
+            await callback.answer("Ushbu kurs uchun video hali yuklanmagan.", show_alert=True)
     else:
-        await callback.answer("❌ Avval to'lov qiling!", show_alert=True)
+        await callback.answer("❌ Videoni ko'rish uchun avval to'lov qilishingiz kerak!", show_alert=True)
 
 # --- ADMIN PANEL ---
 @dp.message(F.text == "⚙️ Admin Panel")
@@ -156,19 +156,19 @@ async def start_add_course(message: types.Message, state: FSMContext):
 @dp.message(AddCourse.name)
 async def process_name(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
-    await message.answer("Narxni faqat raqamlarda (masalan 50000):")
+    await message.answer("Narxni faqat raqamlarda yuboring (Masalan: 50000):")
     await state.set_state(AddCourse.price)
 
 @dp.message(AddCourse.price)
 async def process_price(message: types.Message, state: FSMContext):
     await state.update_data(price=message.text)
-    await message.answer("Tavsifni yuboring:")
+    await message.answer("Kurs tavsifini yuboring:")
     await state.set_state(AddCourse.description)
 
 @dp.message(AddCourse.description)
 async def process_desc(message: types.Message, state: FSMContext):
     await state.update_data(description=message.text)
-    await message.answer("Endi kurs videosini yuboring:")
+    await message.answer("Endi kurs videosini yuboring (Faqat video fayl formatida):")
     await state.set_state(AddCourse.video_id)
 
 @dp.message(AddCourse.video_id, F.video)
@@ -181,11 +181,57 @@ async def process_video(message: types.Message, state: FSMContext):
                    (data['name'], data['price'], data['description'], v_id))
     conn.commit()
     conn.close()
-    await message.answer(f"✅ '{data['name']}' saqlandi.")
+    await message.answer(f"✅ '{data['name']}' kursi video bilan muvaffaqiyatli saqlandi.")
     await state.clear()
 
 @dp.message(F.text == "🗑 Kursni o'chirish")
 async def show_delete_list(message: types.Message):
     if message.from_user.id == ADMIN_ID:
         conn = sqlite3.connect('eduflow_v2.db')
-        cursor
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name FROM courses")
+        courses = cursor.fetchall()
+        conn.close()
+        if not courses:
+            await message.answer("O'chirish uchun kurslar yo'q.")
+            return
+        builder = InlineKeyboardBuilder()
+        for c in courses:
+            builder.row(types.InlineKeyboardButton(text=f"❌ {c[1]}", callback_data=f"del_{c[0]}"))
+        await message.answer("O'chirmoqchi bo'lgan kursingizni tanlang:", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("del_"))
+async def process_delete(callback: types.CallbackQuery):
+    c_id = int(callback.data.split("_")[1])
+    conn = sqlite3.connect('eduflow_v2.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM courses WHERE id = ?", (c_id,))
+    conn.commit()
+    conn.close()
+    await callback.answer("Kurs o'chirildi!")
+    await callback.message.edit_text("✅ Kurs muvaffaqiyatli o'chirildi.")
+
+@dp.message(F.text == "🏠 Bosh menyu")
+async def back_home(message: types.Message):
+    await start(message)
+
+# --- SERVERNI ISHGA TUSHIRISH (RENDER UCHUN) ---
+async def main():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    
+    print(f"Bot serverda {port}-port orqali ishga tushdi...")
+    
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
