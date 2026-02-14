@@ -9,14 +9,14 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 
 # --- ASOSIY MA'LUMOTLAR ---
-API_TOKEN = '8027783889:AAGfvyo1QCEMGH2GfT9C_sK1BWZZcV9XsT0'
+API_TOKEN = '8027783889:AAGfvyoiQCEMGH2GfT9C_sK1BWZZcV9XsT0'
 ADMIN_ID = 7031270541 
 CLICK_TOKEN = '398062629:TEST:999999999_F91D8F69C042267444B74CC0B3C747757EB0E065'
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Render uchun fake port (xatoliklarni oldini olish uchun)
+# Render uchun fake port
 async def handle(request):
     return web.Response(text="Bot is running!")
 
@@ -26,14 +26,12 @@ class AddCourse(StatesGroup):
     description = State()
     video_id = State()
 
-# --- BAZANI SOZLASH ---
+# --- BAZANI SOZLASH (V2) ---
 def init_db():
-    conn = sqlite3.connect('eduflow.db')
+    conn = sqlite3.connect('eduflow_v2.db')
     cursor = conn.cursor()
-    # Kurslar jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS courses 
                       (id INTEGER PRIMARY KEY, name TEXT, price TEXT, description TEXT, video_id TEXT)''')
-    # To'lovlar jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS purchases 
                       (user_id INTEGER, course_id INTEGER)''')
     conn.commit()
@@ -41,10 +39,9 @@ def init_db():
 
 init_db()
 
-# --- FOYDALANUVCHILAR UCHUN START ---
+# --- START VA BILDIRISHNOMA ---
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    # Admin uchun bildirishnoma yuborish
     if message.from_user.id != ADMIN_ID:
         user_info = (
             f"🔔 **Botga yangi foydalanuvchi kirdi!**\n\n"
@@ -64,10 +61,10 @@ async def start(message: types.Message):
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
     await message.answer("Salom! EduFlowUz botiga xush kelibsiz.", reply_markup=keyboard)
 
-# --- KURSNI KO'RISH VA TO'LOV MANTIQI ---
+# --- KURSNI KO'RISH ---
 @dp.message(F.text == "📚 Kurslarni ko'rish")
 async def list_courses(message: types.Message):
-    conn = sqlite3.connect('eduflow.db')
+    conn = sqlite3.connect('eduflow_v2.db')
     cursor = conn.cursor()
     cursor.execute("SELECT id, name, price, description, video_id FROM courses")
     courses = cursor.fetchall()
@@ -85,24 +82,22 @@ async def list_courses(message: types.Message):
         text = f"📔 **Kurs:** {c[1]}\n💰 **Narxi:** {c[2]} so'm\n📝 **Ma'lumot:** {c[3]}"
         await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
-# --- CLICK ORQALI TO'LOV YUBORISH ---
+# --- CLICK TO'LOV ---
 @dp.callback_query(F.data.startswith("buy_"))
 async def send_invoice(callback: types.CallbackQuery):
     course_id = int(callback.data.split("_")[1])
-    
-    conn = sqlite3.connect('eduflow.db')
+    conn = sqlite3.connect('eduflow_v2.db')
     cursor = conn.cursor()
     cursor.execute("SELECT name, price FROM courses WHERE id = ?", (course_id,))
     course = cursor.fetchone()
     conn.close()
 
-    # Narxdan faqat raqamlarni ajratib olish
-    price_val = int(''.join(filter(str.isdigit, course[1]))) * 100 # Tiyinlarda
+    price_val = int(''.join(filter(str.isdigit, course[1]))) * 100 
 
     await bot.send_invoice(
         chat_id=callback.message.chat.id,
         title=course[0],
-        description="Kurs uchun to'lov. To'lovdan so'ng video ochiladi.",
+        description="To'lovdan so'ng video ochiladi.",
         payload=f"course_{course_id}",
         provider_token=CLICK_TOKEN,
         currency="UZS",
@@ -116,22 +111,20 @@ async def checkout(pre_checkout_query: types.Pre_checkout_query):
 @dp.message(F.successful_payment)
 async def got_payment(message: types.Message):
     course_id = int(message.successful_payment.invoice_payload.split("_")[1])
-    
-    conn = sqlite3.connect('eduflow.db')
+    conn = sqlite3.connect('eduflow_v2.db')
     cursor = conn.cursor()
     cursor.execute("INSERT INTO purchases (user_id, course_id) VALUES (?, ?)", (message.from_user.id, course_id))
     conn.commit()
     conn.close()
-    
-    await message.answer("✅ To'lov muvaffaqiyatli! Endi videoni bemalol ko'rishingiz mumkin.")
+    await message.answer("✅ To'lov muvaffaqiyatli! Endi videoni ko'rishingiz mumkin.")
 
-# --- VIDEONI KO'RISH (HIMOYALANGAN) ---
+# --- VIDEO HIMOYASI ---
 @dp.callback_query(F.data.startswith("view_"))
 async def view_video(callback: types.CallbackQuery):
     course_id = int(callback.data.split("_")[1])
     user_id = callback.from_user.id
     
-    conn = sqlite3.connect('eduflow.db')
+    conn = sqlite3.connect('eduflow_v2.db')
     cursor = conn.cursor()
     cursor.execute("SELECT video_id FROM courses WHERE id = ?", (course_id,))
     video = cursor.fetchone()
@@ -143,21 +136,16 @@ async def view_video(callback: types.CallbackQuery):
         if video and video[0]:
             await callback.message.answer_video(video=video[0], caption="Marhamat, kurs videosi!")
         else:
-            await callback.answer("Bu kurs uchun hali video yuklanmagan.", show_alert=True)
+            await callback.answer("Video yuklanmagan.", show_alert=True)
     else:
-        await callback.answer("❌ Videoni ko'rish uchun avval to'lov qiling!", show_alert=True)
+        await callback.answer("❌ Avval to'lov qiling!", show_alert=True)
 
-# --- ADMIN PANEL: KURS QO'SHISH ---
+# --- ADMIN PANEL ---
 @dp.message(F.text == "⚙️ Admin Panel")
 async def admin_panel(message: types.Message):
     if message.from_user.id == ADMIN_ID:
-        kb = [
-            [types.KeyboardButton(text="➕ Kurs qo'shish")],
-            [types.KeyboardButton(text="🗑 Kursni o'chirish")],
-            [types.KeyboardButton(text="🏠 Bosh menyu")]
-        ]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
-        await message.answer("Admin Panel:", reply_markup=keyboard)
+        kb = [[types.KeyboardButton(text="➕ Kurs qo'shish")], [types.KeyboardButton(text="🗑 Kursni o'chirish")], [types.KeyboardButton(text="🏠 Bosh menyu")]]
+        await message.answer("Admin Panel:", reply_markup=types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True))
 
 @dp.message(F.text == "➕ Kurs qo'shish")
 async def start_add_course(message: types.Message, state: FSMContext):
@@ -168,81 +156,36 @@ async def start_add_course(message: types.Message, state: FSMContext):
 @dp.message(AddCourse.name)
 async def process_name(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
-    await message.answer("Kurs narxini faqat raqamlarda yuboring (Masalan: 50000):")
+    await message.answer("Narxni faqat raqamlarda (masalan 50000):")
     await state.set_state(AddCourse.price)
 
 @dp.message(AddCourse.price)
 async def process_price(message: types.Message, state: FSMContext):
     await state.update_data(price=message.text)
-    await message.answer("Kurs tavsifini yuboring:")
+    await message.answer("Tavsifni yuboring:")
     await state.set_state(AddCourse.description)
 
 @dp.message(AddCourse.description)
 async def process_desc(message: types.Message, state: FSMContext):
     await state.update_data(description=message.text)
-    await message.answer("Endi kurs videosini yuboring (Yoki File ID):")
+    await message.answer("Endi kurs videosini yuboring:")
     await state.set_state(AddCourse.video_id)
 
 @dp.message(AddCourse.video_id, F.video)
 async def process_video(message: types.Message, state: FSMContext):
     data = await state.get_data()
     v_id = message.video.file_id
-    
-    conn = sqlite3.connect('eduflow.db')
+    conn = sqlite3.connect('eduflow_v2.db')
     cursor = conn.cursor()
     cursor.execute("INSERT INTO courses (name, price, description, video_id) VALUES (?, ?, ?, ?)", 
                    (data['name'], data['price'], data['description'], v_id))
     conn.commit()
     conn.close()
-    
-    await message.answer(f"✅ '{data['name']}' kursi video bilan saqlandi.")
+    await message.answer(f"✅ '{data['name']}' saqlandi.")
     await state.clear()
 
-# --- KURSNI O'CHIRISH ---
 @dp.message(F.text == "🗑 Kursni o'chirish")
 async def show_delete_list(message: types.Message):
     if message.from_user.id == ADMIN_ID:
-        conn = sqlite3.connect('eduflow.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, name FROM courses")
-        courses = cursor.fetchall()
-        conn.close()
-        
-        if not courses:
-            await message.answer("O'chirish uchun kurs yo'q.")
-            return
-        
-        builder = InlineKeyboardBuilder()
-        for c in courses:
-            builder.row(types.InlineKeyboardButton(text=f"❌ {c[1]}", callback_data=f"del_{c[0]}"))
-        await message.answer("O'chirishni tanlang:", reply_markup=builder.as_markup())
-
-@dp.callback_query(F.data.startswith("del_"))
-async def process_delete(callback: types.CallbackQuery):
-    c_id = int(callback.data.split("_")[1])
-    conn = sqlite3.connect('eduflow.db')
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM courses WHERE id = ?", (c_id,))
-    conn.commit()
-    conn.close()
-    await callback.answer("O'chirildi!")
-    await callback.message.edit_text("✅ Kurs bazadan olib tashlandi.")
-
-@dp.message(F.text == "🏠 Bosh menyu")
-async def back_home(message: types.Message):
-    await start(message)
-
-# --- SERVERNI ISHGA TUSHIRISH ---
-async def main():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000)))
-    await site.start()
-    
-    print("Bot serverda ishga tushdi...")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        conn = sqlite3.connect('eduflow_v2.db')
+        cursor
